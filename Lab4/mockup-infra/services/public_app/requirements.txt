@@ -1,0 +1,1 @@
+# No external dependencies - using Python's built-in http.server

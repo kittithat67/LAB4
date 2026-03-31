@@ -1,0 +1,218 @@
+version: '3.8'
+
+networks:
+  public_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+  private_net:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.19.0.0/16
+
+volumes:
+  mime_storage:
+
+
+services:
+  nginx-gateway:
+    image: nginx:alpine
+    container_name: mockup-gateway
+    ports:
+      - "8080:80"
+      - "443:443"
+    networks:
+      public_net:
+        ipv4_address: 172.20.0.2
+      private_net:
+        ipv4_address: 172.19.0.2
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - public_app
+      - intranet_api
+    restart: unless-stopped
+
+  public_app:
+    build: ./services/public_app
+    container_name: mockup-public-web
+    networks:
+      public_net:
+        ipv4_address: 172.20.0.3
+    expose:
+      - "80"
+    environment:
+      - SERVICE_NAME=public_app
+      - SERVICE_PORT=80
+    restart: unless-stopped
+
+  intranet_api:
+    build: ./services/intranet_api
+    container_name: mockup-intranet-api
+    networks:
+      private_net:
+        ipv4_address: 172.19.0.3
+    expose:
+      - "5000"
+    environment:
+      - SERVICE_NAME=intranet_api
+      - SERVICE_PORT=5000
+    restart: unless-stopped
+
+  mime-server:
+    build:
+      context: ../week01-mime-typing
+      dockerfile: Dockerfile.server
+    container_name: mime-server
+    networks:
+      public_net:
+        ipv4_address: 172.20.0.4
+      private_net:
+        ipv4_address: 172.19.0.5
+    expose:
+      - "65432"
+    volumes:
+      - mime_storage:/storage
+    environment:
+      - PYTHONIOENCODING=utf-8
+      - STORAGE_DIR=/storage
+    depends_on:
+      - nginx-gateway
+    restart: unless-stopped
+    profiles:
+      - week01
+      - reference
+
+  mime-client:
+    build:
+      context: ../week01-mime-typing
+      dockerfile: Dockerfile.client
+    container_name: mime-client
+    networks:
+      private_net:
+        ipv4_address: 172.19.0.4
+    environment:
+      - PYTHONIOENCODING=utf-8
+      - MIME_SERVER_HOST=mime-server
+      - MIME_SERVER_PORT=65432
+    depends_on:
+      - mime-server
+    profiles:
+      - week01
+      - reference
+      - client-manual
+    stdin_open: true
+    tty: true
+    restart: "no"
+
+  stateless-api:
+    build:
+      context: ../week02-stateless-stateful/phase1-mockup
+      dockerfile: Dockerfile.stateless
+    image: localhost/stateless-api:v2
+    container_name: stateless-api
+    networks:
+      public_net:
+        ipv4_address: 172.20.0.6
+    expose:
+      - "3000"
+    environment:
+      - NODE_ENV=production
+      - SERVICE_NAME=stateless-api
+      - SERVICE_PORT=3000
+    depends_on:
+      - nginx-gateway
+    restart: unless-stopped
+    profiles:
+      - week02
+
+  stateful-api:
+    build:
+      context: ../week02-stateless-stateful/phase1-mockup
+      dockerfile: Dockerfile.stateful
+    image: localhost/stateful-api:v2.1
+    container_name: stateful-api
+    networks:
+      private_net:
+        ipv4_address: 172.19.0.6
+    expose:
+      - "3001"
+    environment:
+      - NODE_ENV=production
+      - SERVICE_NAME=stateful-api
+      - SERVICE_PORT=3001
+    depends_on:
+      - nginx-gateway
+    restart: unless-stopped
+    profiles:
+      - week02
+
+  # Week 03 Microservices
+  upload-service:
+    build:
+      context: ../week03-microservices/phase1/services/upload
+    container_name: upload-service
+    networks:
+      public_net:
+        ipv4_address: 172.20.0.7
+    expose:
+      - "8000"
+    environment:
+      - PYTHONIOENCODING=utf-8
+      - SERVICE_NAME=upload-service
+      - SERVICE_PORT=8000
+      - PROCESSING_SERVICE_URL=http://172.19.0.7:8000
+      - AI_SERVICE_URL=http://172.19.0.8:8000
+    volumes:
+      - ../week03-microservices/phase1/mock_storage:/app/mock_storage
+      - ../week03-microservices/phase1/mock_metadata:/app/mock_metadata
+    depends_on:
+      - nginx-gateway
+    restart: unless-stopped
+    profiles:
+      - week03
+
+  processing-service:
+    build:
+      context: ../week03-microservices/phase1/services/processing
+    container_name: processing-service
+    networks:
+      private_net:
+        ipv4_address: 172.19.0.7
+    expose:
+      - "8000"
+    environment:
+      - PYTHONIOENCODING=utf-8
+      - SERVICE_NAME=processing-service
+      - SERVICE_PORT=8000
+      - UPLOAD_SERVICE_URL=http://172.20.0.7:8000
+    depends_on:
+      - nginx-gateway
+    restart: unless-stopped
+    profiles:
+      - week03
+
+  ai-service:
+    build:
+      context: ../week03-microservices/phase1/services/ai
+    container_name: ai-service
+    networks:
+      private_net:
+        ipv4_address: 172.19.0.8
+    expose:
+      - "8000"
+    environment:
+      - PYTHONIOENCODING=utf-8
+      - SERVICE_NAME=ai-service
+      - SERVICE_PORT=8000
+      - UPLOAD_SERVICE_URL=http://172.20.0.7:8000
+    depends_on:
+      - nginx-gateway
+    restart: unless-stopped
+    profiles:
+      - week03
